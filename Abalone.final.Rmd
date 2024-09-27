@@ -1,0 +1,261 @@
+
+---
+title: "Predicting The Age of Abalone"
+author: "Simon Atoyire and Viren Gadkari"
+date: "December 06, 2023"
+output: 
+  prettydoc::html_pretty:
+    toc: true
+    theme: cayman
+    highlight: github
+---
+
+
+
+
+
+
+
+
+```{r setup, echo= FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(GGally)
+library(car)
+library(ggplot2)
+library(ggfortify)
+library(dplyr)
+library(tidyverse)
+library(lattice)
+library(leaps)
+library(boot)
+library(caTools)
+```
+
+# Introduction 
+
+## Data Description
+
+Determining the age of an abalone can be a very time-consuming task. It involves cutting the shell through the cone, staining it, and counting the number of rings through a microscope. The age of an abalone is determined by then taking the number of rings and adding 1.5. This process as it is can be something researchers would wish automate. Thus, we consider the task of building a predictive model that can take features of an abalone, and attempt to predict the age with high accuracy. The following report explores this problem, with a description of our initial exploratory data analysis, the proposed full model, and the models that are generated from model selection procedures. In the end we determine a final model to aid researchers in predicting the age of a model. The dataset that we used can be found at kaggle.com, which consists of 4177 abalones with 8 different features measured for each of them. The 8 predictors in the original dataset are the Sex, Length, Diameter, Height, Whole Weight, Shucked Weight, Viscera Weight, Shell Weight. The response variable is Rings, however, for the purposes of interpretability, we create a variable "Age" which is the Rings+1.5, and we treat this as our new response. 
+
+## Clarification of Original Predictors
+
+We start by clarifying the context of some of the predictors: 
+
+Sex - M for male, F for female, and I for infant
+
+Length - The longest shell measurement, in millimeters
+
+Diameter - The shell measurement perpendicular to the length, in millimeters
+
+Height - The height with meat in the shell, in millimeters
+
+Whole Weight - The weight of the whole abalone in grams
+
+Shucked Weight - The weight of the meat in grams
+
+Viscera Weight - The gut weight after bleeding in grams
+
+Shell Weight - The shell weight after being dried in grams
+
+
+Just from the description of these predictors, we believe that these set of predictors could be highly correlated to each other, and could introduce some multicollinearity into a future model. We will verify this with our exploratory data analysis in the next section. 
+
+
+
+
+
+# EXPLORATORY DATA ANALYSIS
+
+## Exploring the Raw Data
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+setwd("C:\\Users\\satoy\\Desktop\\1st Yr 1st Sem\\STA 563\\Project 2\\Abalone")
+Abalone.data<-read.csv("abalone.csv", header=TRUE, sep=",")
+Abalone.data<-Abalone.data%>%mutate(Age=Rings+1.5)#Computing the age variable
+dim(Abalone.data) # number of rows and columns
+ggpairs(Abalone.data, c("Sex","Shell_Lnt","Shell_Dia","Shell_Hgt","Whole_Wgt","Shucked_Wgt","Viscera_Wgt","Shell_Wgt","Age"))
+```
+
+The scatter plot matrix above shows the relationship between all the study variables. It is observed that all the predictor variables and the response variables. More importantly, there appears to be high correlation among all the predictor variables which suggests multicollinearity. Thus there is the need to deal with this issue to obtain a robust predictive model.
+The response variable (Age) is also found to be right skewed and this is more evident in the histogram below.
+The skewness of the response variable and the issue of multicollinearity requires that the data is transformed to overcome these issues,
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+hist(Abalone.data$Age)
+```
+
+
+## Addressing Multicollinearity and Normality Through Data Transformation. 
+
+To deal with the skewness in the response variable, the Age variable was transformed to log(Age) and this was found to be approximately normal.
+Also, all eight predictor variables were also transformed by standardizing then to remove the correlation between them. Doing so, six predictors were obtained including 'Sex'and five new predictors computed below: 
+
+$Shucked_Wgt-to-Whole_Wgt ratio (SkWR) = Shucked\_Wgt/Whole\_Wgt$
+$Viscera_Wgt-to-Whole_Wgt ratio (VWR) = Viscera\_Wgt/Whole\_Wgt$
+$Shell_Wgt-to-Whole_Wgt ratio (ShWR) = Shell\_Wgt/Whole\_Wgt$
+$Shell_Hgt-to-Shell_Lnt ratio (HLR) = Shell\_Hgt/Shell\_Lnt$
+$Shell_Dia-to-Shell_Lnt (DLR) = Shell\_Dia/Shell\_Lnt$
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+T.Abalone.data<-Abalone.data%>%mutate(Log_Age=log(Age),SkWR=(Shucked_Wgt/Whole_Wgt),VWR=(Viscera_Wgt/Whole_Wgt),ShWR=(Shell_Wgt/Whole_Wgt),HLR=(Shell_Hgt/Shell_Lnt),DLR=(Shell_Dia/Shell_Lnt))
+dim(T.Abalone.data) # number of rows and columns
+ggpairs(T.Abalone.data, c("Sex","SkWR","VWR","ShWR","HLR","DLR","Log_Age"))
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+hist(T.Abalone.data$Log_Age)
+```
+From the scatter plot matrix, it was observed that the multicollinearity was corrected after the predictors were transformed. The histogram also showed that transforming the "Age" variable to "Log(Age)", resulted in the response variable following the normal distribution.
+Thus from here, predictors in this work refers to the transformed predictors (SkWR, VWR, ShWR, HLR, DLR) and Sex which serve as our main effect predictors.
+
+
+## Scatter plots between Age and each main effect predictor variable accounting for the other predictoss.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+model.main_effects<-lm(Log_Age~Sex+SkWR+VWR+ShWR+HLR+DLR, data=T.Abalone.data)
+avPlots(model.main_effects)
+```
+
+These plots show the relationship between Age and each of the predictor variables conditioned on the other variables. We can see that all the predictor variables show some kind of relationship with the response variable 'Log(Age)' except for sexM which does not really show a significant relationship provided that the other variables are maintained as predictors in the model. 
+
+
+# DATA ANALYSIS
+
+## Best Subset Selection Using AIC
+
+```{r, Best Subset Selection, echo=FALSE, warning=FALSE, message=FALSE}
+full.Abalone=regsubsets(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data)
+Summary.Abalone=summary(full.Abalone)
+names(Summary.Abalone)
+
+#Model selection using the AIC criterion
+Best.AIC.Model=which.min(Summary.Abalone$cp)
+Best.AIC.Model
+#graph showing the preferred  number of terms in the model
+plot(Summary.Abalone$cp, xlab="Number of Variables",ylab="AIC")
+points(Best.AIC.Model,Summary.Abalone$cp[Best.AIC.Model], col="blue", cex=2,pch=20)
+#specific model chosen per AIC criterion
+coef(full.Abalone,Best.AIC.Model) 
+
+```
+The AIC criterion suggests the 8 predictor model above as the best model for predicting Log(Age) of Abalones.
+
+
+## Best Subset Selection Using BIC
+
+```{r, echo= FALSE, warning=FALSE, message=FALSE}
+#Model selection using the BIC criterion
+Best.BIC.Model=which.min(Summary.Abalone$bic)
+Best.BIC.Model
+#graph showing the preferred  number of terms in the model
+plot(Summary.Abalone$bic, xlab="Number of Variables",ylab="BIC")
+points(Best.BIC.Model,Summary.Abalone$bic[Best.BIC.Model], col="red", cex=2,pch=20)
+#specific model chosen per BIC criterion
+coef(full.Abalone,Best.BIC.Model) 
+```
+The BIC criterion also suggests the same 8 predictor model suggested by the AIC criterion as the best model for predicting the Log(Age) of Abalones.
+
+
+## Test for Model Quality
+
+To examine whether the model selected using the AIC/BIC criteria does a good job predicting log of Abalones' age, the model is compared to 2 other models: model with only the main effect predictors and the full model with all the 2-factor interactions using the holdout test and the K-fold Cross validation.
+
+### Holdout Test    
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Split the dataset into training and holdout sets
+set.seed(123)  # For reproducibility
+T.Abalone.data$split <- sample(c(0, 1), size = nrow(T.Abalone.data), replace = TRUE,prob = c(0.3, 0.7))
+T.Abalone.data$SexI<-T.Abalone.data$Sex=="I"
+
+# Create the training set
+training_set <- subset(T.Abalone.data, split ==1)
+
+# Create the holdout set
+holdout_set <- subset(T.Abalone.data, split == 0)
+
+
+#Model suggested by AIC/BIC criteria
+BICModel.fit=lm(Log_Age~SexI+HLR+DLR+SexI:SkWR+SexI:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=training_set)
+
+BICModel_RMSE<-sqrt(mean((holdout_set$Log_Age-predict(BICModel.fit,holdout_set))^2))
+print(paste('BIC Model test error: ', BICModel_RMSE))
+
+MEModel.fit=lm(Log_Age~Sex+SkWR+VWR+ShWR+HLR+DLR, data=training_set)
+
+MEModel_RMSE<-sqrt(mean((holdout_set$Log_Age-predict(MEModel.fit,holdout_set))^2))
+print(paste('Main effects Model test error: ', MEModel_RMSE))
+
+#The full Model containing all the predictors and their interactions
+fullModel.fit=lm(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=training_set)
+
+FullMOdel_RMSE<-sqrt(mean((holdout_set$Log_Age-predict(fullModel.fit,holdout_set))^2))
+print(paste('Full Model test error: ', FullMOdel_RMSE))
+```
+The RMSEs from the ho;dpout test show that the model suggested by the BIC criterion has the smallest test error (0.213) compared to 0.231 and 0.25 for the main effects model and the full model with all 2-factor interactions respectively. Thus, the BIC model is the best among the three tested. 
+
+
+
+### Test Using K-Fold Cross Validation.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+BICModel.fit.KF=glm(Log_Age~SexI+HLR+DLR+SexI:SkWR+SexI:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=T.Abalone.data)
+error.KF1=cv.glm(T.Abalone.data,BICModel.fit.KF, K=10)
+#Compute RMSE for AIC/BIC model
+BICMOdel_RMSE1<-sqrt(error.KF1$delta[1])
+print(paste('BIC Model test error: ', BICMOdel_RMSE1))
+```
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+MEModel.fit.KF=glm(Log_Age~Sex+SkWR+VWR+ShWR+HLR+DLR, data=T.Abalone.data)
+error.KF2=cv.glm(T.Abalone.data,MEModel.fit.KF, K=10)
+#Compute RMSE for AIC/BIC model
+MEMOdel_RMSE1<-sqrt(error.KF2$delta[1])
+print(paste('Main effects Model test error: ', MEMOdel_RMSE1))
+```
+```{r, echo=FALSE}
+fullModel.fit.KF=glm(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data)
+error.KF3=cv.glm(T.Abalone.data,fullModel.fit.KF, K=10)
+#Compute RMSE for the full model
+FullMOdel_RMSE1<-sqrt(error.KF3$delta[1])
+print(paste('Full Model test error: ', FullMOdel_RMSE1))
+```
+The RMSEs from the 'K-fold cross validation test' show that the model suggested by the BIC criterion has the smallest test error (0.210) compared to 0.232 and 0.22 for the main effects model and the full model with all 2-factor interactions respectively. Thus,again, the BIC model is the best among the three tested.
+
+
+# TEST FOR ROBUSTNESS
+
+## Using the "forward method" to confirm the best subset selected by the "BIC" criterion.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+full.Abalone=regsubsets(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data, method="forward")
+Summary.Abalone=summary(full.Abalone)
+Summary.Abalone
+```
+
+To perform a robustness check, the forward method was use to select the best subset to further confirm the model selected by the BIC method the best and it also suggested the same model as the BIC model below:
+
+$\log(Age) = \beta_{0} + \beta_{1}SexInfant + \beta_{2}HLR + \beta_{3}DLR + \beta_{4}SexInfant*SkWR + \beta_{5}SexInfant*DLR + \beta_{6}SkWR*HLR + \beta_{7}VWR*HLR + \beta_{8}HLR*DLR$
+
+
+# Conclusion 
+
+The initial exploratory data analysis pointed to some flaws in the original set of predictors. The predictors were highly correlated with one another, and we addressed this by creating a set of new predictors that were derived from the existing predictors. More specifically, we considered a set of "ratio" predictors that would try to combine the information through a ratio. We noticed that this set of predictors were uncorrelated with one another, resulting in a set of predictors that mitigated multicollinearity. Furthermore, to verify the functional form of our model we perform a log transformation on the age to get a response which looks approximately normal. 
+
+
+After model selection and validation, we propose the final model: 
+
+$\log(Age) = \beta_{0} + \beta_{1}SexInfant + \beta_{2}HLR + \beta_{3}DLR + \beta_{4}SexInfant*SkWR + \beta_{5}SexInfant*DLR + \beta_{6}SkWR*HLR + \beta_{7}VWR*HLR + \beta_{8}HLR*DLR$
+
+
+This model was validated on a 70% Training, 30% testing split, and had the lowest RMSE compared to the two other models, which were the full models with the main effects only, and the model with the main effects and two factor interactions. We used best subset selection to select the best model size, which resulted in the proposed model, and was selected using BIC. 
+
+
+# Appendix
+
+Main Effects Model:
+$\log(Age) = \beta_{0} + \beta_{1}Sex + \beta_{2}HLR + \beta_{3}DLR + \beta_{4}SkWR + \beta_{5}ShWR + \beta_{6}VWR$
+
+Full Model:
+$\log(Age) = \beta_{0} + \beta_{1}Sex + \beta_{2}HLR + \beta_{3}DLR + \beta_{4}SkWR + \beta_{5}ShWR + \beta_{6}VWR+ \beta_{7} Sex:HLR + \beta_{8}Sex:DLR + \beta_{9}Sex:SkWR + \beta_{10}Sex:ShWR + \beta_{11}Sex:VWR + \beta_{12}HLR:DLR + \beta_{13}HLR:SkWR + \beta_{14}HLR:ShWR + \beta_{15}HLR:VWR + \beta_{16}DLR:SkWR + \beta_{17}DLR:ShWR + \beta_{18}DLR:VWR + \beta_{19}SkWR:ShWR + \beta_{20}SkWR:VWR + \beta_{21}ShWR:VWR$
+

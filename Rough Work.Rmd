@@ -1,0 +1,235 @@
+---
+title: "Rough Work"
+author: "SIMON"
+date: "2023-12-09"
+output: html_document
+---
+
+---
+title: "try"
+author: "SIMON"
+date: "2023-12-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(GGally)
+library(car)
+library(ggplot2)
+library(ggfortify)
+library(dplyr)
+library(tidyverse)
+library(lattice)
+library(leaps)
+library(boot)
+library(caTools)
+```
+
+
+#Exporing the Raw data
+```{r, warning=FALSE, message=FALSE}
+Abalone.data<-read.csv("C:\\Users\\satoy\\Desktop\\STA 563\\Project 2\\Abalone\\abalone.csv", header=TRUE, sep=",")
+Abalone.data<-Abalone.data%>%mutate(Age=Rings+1.5)#Computing the age variable
+dim(Abalone.data) # number of rows and columns
+head(Abalone.data)
+ggpairs(Abalone.data, c("Sex","Shell_Lnt","Shell_Dia","Shell_Hgt","Whole_Wgt","Shucked_Wgt","Viscera_Wgt","Shell_Wgt","Age"))
+
+```
+```{r}
+hist(Abalone.data$Age)
+```
+The response variable (Age) appears to be right skewed and therefore requires to be transformed in order to remove the skewness in the data.
+
+#Checking Assumptions of Linear Regression
+```{r, warning=FALSE, message=FALSE}
+raw.model<-lm(Age~(Sex+Shell_Lnt+Shell_Dia+Shell_Hgt+Whole_Wgt+Shucked_Wgt+Viscera_Wgt+Shell_Wgt), data=Abalone.data)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+plot(raw.model)
+```
+
+The residuals in the Q-Q plot show a distinct divergence from normal distribution, as seen by significant deviations from the diagonal line at both extremities. This finding shows that the model residuals deviate from the normality assumption.
+Furthermore, the Residual versus Fitted plot shows a distinct pattern in the residuals, indicating possible issues with the assumed model form and the assumption of equal variance across fitted values. The evident pattern in the residuals suggests that additional examination into the suitability of the model settings is required.
+Furthermore, the discovery of major outliers, notably the observation at index 2052 in the Residuals vs Leverage plot, raises worries regarding influential data points that might have a significant influence on the model. Further investigation of these outliers is required.
+Thus, to deal with these issues, the response variable is transformed below.
+
+
+#Exploring transformed data with response variable as Log(Age) 
+```{r, warning=FALSE, message=FALSE}
+T.Abalone.data<-Abalone.data%>%mutate(Log_Age=log(Age),SkWR=(Shucked_Wgt/Whole_Wgt),VWR=(Viscera_Wgt/Whole_Wgt),ShWR=(Shell_Wgt/Whole_Wgt),HLR=(Shell_Hgt/Shell_Lnt),DLR=(Shell_Dia/Shell_Lnt))
+dim(T.Abalone.data) # number of rows and columns
+head(T.Abalone.data)
+#ggpairs(T.Abalone.data, c("Sex","Shell_Lnt","Shell_Dia","Shell_Hgt","Whole_Wgt","Shucked_Wgt","Viscera_Wgt","Shell_Wgt","Log_Age"))
+ggpairs(T.Abalone.data, c("Sex","SkWR","VWR","ShWR","HLR","DLR","Log_Age"))
+```
+
+```{r}
+hist(T.Abalone.data$Log_Age)
+```
+From the scatter plot matrix and the histogram above, we can see that after transforming the "Age" variable to "Log(Age)", it appears to be symmetric in shape
+
+
+#Testing Linear regression Assumptions
+```{r, warning=FALSE, message=FALSE}
+model<-lm(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+plot(model)
+```
+Furthermore, significant increases in model assumption conformance are shown. The "Residuals vs Fitted" figure shows no obvious trend, signalling the possible address of concerns with model forms and equal variance assumptions observed earlier. This observation suggests increased satisfaction with these key assumptions. The Q-Q plot adds to the greater conformance to normalcy by showing that the bulk of points approximately line up with the diagonal line, with only a few outliers. These outliers, as seen in the "Residuals vs. Leverage" graphic, have no substantial influence on the model, showing a more robust adherence to the normality and outlier assumptions. As a result, the findings from these diagnostic plots imply that the linear regression model fitted using the transformed data obeys the underlying assumptions, confirming its dependability and appropriateness.
+
+
+#Scatter plots between Age and the main effect predictor variable accounting for the other variables.
+```{r, message=FALSE, warning=FALSE}
+model.main_effects<-lm(Log_Age~Sex+SkWR+VWR+ShWR+HLR+DLR, data=T.Abalone.data)
+avPlots(model.main_effects)
+```
+
+These plots show the relationship between Age and each of the predictor variables conditioned on the other variables. We can see that all the predictor variables show some kind of relationship with the response variable (Age) except for sexM which does not really show a significant relationship provided that the other variables are maintained as predictors in the model. 
+
+
+#Data Analysis..................................................................
+```{r, Best Subset Selection}
+full.Abalone=regsubsets(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data)
+Summary.Abalone=summary(full.Abalone)
+names(Summary.Abalone)
+
+#Model selection using the AIC criterion
+Best.AIC.Model=which.min(Summary.Abalone$cp)
+Best.AIC.Model
+#graph showing the preferred  number of terms in the model
+plot(Summary.Abalone$cp, xlab="Number of Variables",ylab="AIC")
+points(Best.AIC.Model,Summary.Abalone$cp[Best.AIC.Model], col="blue", cex=2,pch=20)
+#specific model chosen per AIC criterion
+coef(full.Abalone,Best.AIC.Model) 
+
+```
+The AIC criterion suggests that the 8 predictor model above as the best model for predicting Log(Age) of Abalones.
+
+
+```{r}
+#Model selection using the BIC criterion
+Best.BIC.Model=which.min(Summary.Abalone$bic)
+Best.BIC.Model
+#graph showing the preferred  number of terms in the model
+plot(Summary.Abalone$bic, xlab="Number of Variables",ylab="BIC")
+points(Best.BIC.Model,Summary.Abalone$bic[Best.BIC.Model], col="red", cex=2,pch=20)
+#specific model chosen per BIC criterion
+coef(full.Abalone,Best.BIC.Model) 
+```
+The BIC criterion also suggests the same 8 predictor model suggested by the AIC criterion as the best model for predicting the Log(Age) of Abalones.
+
+```{r}
+#model selection using Adj. R.sq
+Best.adjR2.Model=which.max(Summary.Abalone$adjr2)
+Best.adjR2.Model
+#graph showing the preferred  number of terms in the model
+plot(Summary.Abalone$adjr2, xlab="Number of Variables",ylab="RSq.Adj")
+points(Best.adjR2.Model,Summary.Abalone$adjr2[Best.adjR2.Model], col="green", cex=2,pch=20)
+#specific model chosen per Adjusted R.sq criterion
+coef(full.Abalone,Best.adjR2.Model)
+```
+
+To examine whether the model selected using the AIC/BIC criteria does a good job predicting Abalones' age, the model is compared to 2 other models: model with only the main effect predictors and the full model with all the 2-factor interactions using the holdout test.
+
+#Holdout Test    
+```{r}
+# Split the dataset into training and holdout sets
+# Assuming your dataset is in a data frame called 'your_data'
+set.seed(123)  # For reproducibility
+T.Abalone.data$split <- sample(c(0, 1), size = nrow(T.Abalone.new), replace = TRUE,prob = c(0.3, 0.7))
+T.Abalone.data$SexI<-T.Abalone.data$Sex=="I"
+
+# Create the training set
+training_set <- subset(T.Abalone.data, split ==1)
+
+# Create the holdout set
+holdout_set <- subset(T.Abalone.data, split == 0)
+
+
+#Model suggested by AIC/BIC criteria
+BICModel.fit=lm(Log_Age~SexI+HLR+DLR+SexI:SkWR+SexI:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=training_set)
+#summary(BICModel.fit)
+
+sqrt(mean((holdout_set$Log_Age-predict(BICModel.fit,holdout_set))^2))
+
+#Same as model suggested by AIC/BIC criteria but with all sex categories.
+ALLSexModel.fit=lm(Log_Age~Sex+HLR+DLR+Sex:SkWR+Sex:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=training_set)
+
+sqrt(mean((holdout_set$Log_Age-predict(ALLSexModel.fit,holdout_set))^2))
+
+#The full Model containing all the predictors and their interactions
+fullModel.fit=lm(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=training_set)
+
+sqrt(mean((holdout_set$Log_Age-predict(fullModel.fit,holdout_set))^2))
+
+```
+
+
+
+
+#LOOCV
+```{r}
+BICModel.fit.CV=glm(Log_Age~Shell_Lnt+Shucked_Wgt+Shell_Wgt+SexI:Shell_Lnt+SexI:Shell_Hgt+SexI:Shucked_Wgt+Shell_Lnt:Shell_Wgt+Whole_Wgt:Shucked_Wgt, data=T.Abalone.data)
+error.CV1=cv.glm(T.Abalone.data,BICModel.fit.CV)
+#Compute RMSE for AIC/BIC model
+sqrt(error.CV1$delta[1])
+
+
+ALLSexModel.fit.CV=glm(Log_Age~Sex+Shell_Lnt+Shell_Dia+Shell_Hgt+Whole_Wgt+Shucked_Wgt+Viscera_Wgt+Shell_Wgt, data=T.Abalone.data)
+error.CV2=cv.glm(T.Abalone.data,ALLSexModel.fit.CV)
+#Compute RMSE for the model with all sex categories
+sqrt(error.CV2$delta[1])
+
+
+fullModel.fit.CV=glm(Log_Age~(Sex+Shell_Lnt+Shell_Dia+Shell_Hgt+Whole_Wgt+Shucked_Wgt+Viscera_Wgt+Shell_Wgt)^2, data=T.Abalone.data)
+error.CV3=cv.glm(T.Abalone.data,fullModel.fit.CV)
+#Compute RMSE for the full model
+sqrt(error.CV3$delta[1])
+```
+
+#K-Fold Cross Validation
+```{r, Computing the quality of prediction using the LOOCV method}
+BICModel.fit.KF=glm(Log_Age~SexI+HLR+DLR+SexI:SkWR+SexI:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=T.Abalone.data)
+error.KF1=cv.glm(T.Abalone.data,BICModel.fit.KF, K=10)
+#Compute RMSE for AIC/BIC model
+sqrt(error.CV1$delta[1])
+```
+
+```{r}
+M.E_Model.fit.KF=glm(Log_Age~Sex+HLR+DLR+Sex:SkWR+Sex:DLR+SkWR:HLR+VWR:HLR+HLR:DLR, data=T.Abalone.data)
+error.KF2=cv.glm(T.Abalone.data,M.E_Model.fit.KF, K=10)
+#Compute RMSE for the model with all sex categories
+sqrt(error.CV2$delta[1])
+```
+
+```{r}
+fullModel.fit.KF=glm(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data)
+error.KF3=cv.glm(T.Abalone.data,fullModel.fit.KF, K=10)
+#Compute RMSE for the full model
+sqrt(error.CV3$delta[1])
+```
+
+
+#USING THE FORWARD METHOD TO SELECT THE BEST SUBSET
+```{r, Best Subset Selection}
+full.Abalone=regsubsets(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data, method="forward")
+Summary.Abalone=summary(full.Abalone)
+Summary.Abalone
+```
+
+#USING THE BACKWARD METHOD FOR BEST SUBSET
+```{r, Best Subset Selection}
+full.Abalone1=regsubsets(Log_Age~(Sex+SkWR+VWR+ShWR+HLR+DLR)^2, data=T.Abalone.data, method="backward")
+Summary.Abalone1=summary(full.Abalone1)
+Summary.Abalone1
+```
+
+Notice that this selects the same model as AIC and BIC above.
